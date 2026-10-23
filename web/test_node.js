@@ -117,7 +117,7 @@ if (have([VP + '/splloader.bin', VP + '/uboot.bin', VP + '/trustos.bin'])) {
   ub = C.buildVp19(ub, a2, C.rd32(ub, 0x30), {});
   const v2 = C.verifyVp19(ub, a2, C.rd32(ub, 0x30), {});
   check('vp19 verify failures', v2.bad === 0, 'bad=' + v2.bad);
-  check('vp19 uboot md5', C.md5(ub) === '182568bf466ce13ff7016def7dd80178', C.md5(ub));
+  check('vp19 uboot md5', C.md5(ub) === '29d23165239080165da4734765b66843', C.md5(ub));
   check('vp19 kick RET1', C.rd32(ub, a2.RET1) === 0x52800033);
   check('vp19 kick FORCE_PORT', C.rd32(ub, a2.FORCE_PORT) === 0x350001c0);
   check('vp19 kick TRIG', C.rd32(ub, a2.TRIG) === C.bl_(C.va(a2.TRIG), a2.PRINTF));

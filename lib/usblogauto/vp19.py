@@ -29,11 +29,12 @@ DEAD_SIZE = 0x2A4
 
 LAYOUT_V2 = [
     ('FLAG', 0x00),
+    ('SLOCK', 0x01),
     ('SCREENLOG', 0x04),
-    ('EARLYLCD', 0x34),
-    ('HOOK', 0x70),
-    ('PUMP', 0xA4),
-    ('EMIT', 0xE0),
+    ('EARLYLCD', 0x64),
+    ('HOOK', 0xA0),
+    ('PUMP', 0xD4),
+    ('EMIT', 0x110),
     ('DEAD_END', DEAD_SIZE),
 ]
 
@@ -98,6 +99,7 @@ def locate_lcd(d, log=print):
             break
     if lcd_en is None:
         raise F.FindError('lcd_is_enabled not found in lcd_puts')
+    res['PANEL'] = 0x9F1DC6B0          # s_sprdfb_dev.panel, read by lcd_refresh
     res['LCD_ENABLED'] = lcd_en
     log('  %-10s %#x' % ('LCD_ENABLED', lcd_en))
     return res
@@ -124,7 +126,9 @@ class BuildError(Exception):
 
 
 def code_screenlog(a):
-    """if (lcd_is_enabled) { lcd_puts(s); lcd_refresh(); }"""
+    """if (lcd_is_enabled && panel) { lcd_puts(s); lcd_refresh(); } with a
+    re-entrancy lock: lcd_refresh() prints through printf() when the panel is
+    missing or the refresh fails, and printf ends up back in this hook."""
     S = a['SCREENLOG']
     V = lambda k: va(S + k * 4)
     return [
@@ -133,13 +137,23 @@ def code_screenlog(a):
         0xF9000BE0,                                   #  2 str x0,[sp,#0x10]
         A.adrp(1, V(3), a['LCD_ENABLED']),            #  3
         A.add_imm(1, 1, a['LCD_ENABLED'] & 0xFFF),    #  4
-        A.ldrb_imm(1, 1, 0),                          #  5 ldrb w1,[x1]
-        A.cbz_w(1, 3),                                #  6 cbz w1,restore
-        A.bl_(V(7), va(a['LCD_PUTS'])),                   #  7 bl lcd_puts
-        A.bl_(V(8), va(a['LCD_REFRESH'])),                #  8 bl lcd_refresh
-        0xF9400BE0,                                   #  9 ldr x0,[sp,#0x10]
-        0xA8C27BFD,                                   # 10 ldp x29,x30,[sp],#0x20
-        0xD65F03C0,                                   # 11 ret
+        A.ldrb_imm(1, 1, 0),                          #  5 ldrb w1,[lcd_is_enabled]
+        A.cbz_w(1, 13),                               #  6 cbz w1,done
+        A.adrp(2, V(7), a['PANEL']),                  #  7
+        A.ldr_x_imm(2, 2, (a['PANEL'] & 0xFFF) // 8), #  8 ldr x2,[panel]
+        A.cbz_x(2, 10),                               #  9 cbz x2,done
+        A.adrp(3, V(10), va(a['SLOCK'])),             # 10
+        A.add_imm(3, 3, va(a['SLOCK']) & 0xFFF),      # 11
+        A.ldrb_imm(4, 3, 0),                          # 12 ldrb w4,[slock]
+        A.cbnz_w(4, 6),                               # 13 cbnz w4,done
+        0xD2800024,                                   # 14 mov w4,#1
+        A.strb_imm(4, 3, 0),                          # 15 strb w4,[x3]
+        A.bl_(V(16), va(a['LCD_PUTS'])),              # 16 bl lcd_puts
+        A.bl_(V(17), va(a['LCD_REFRESH'])),           # 17 bl lcd_refresh
+        A.strb_imm(31, 3, 0),                         # 18 strb wzr,[x3]
+        0xF9400BE0,                                   # 19 done: ldr x0,[sp,#0x10]
+        0xA8C27BFD,                                   # 20 ldp x29,x30,[sp],#0x20
+        0xD65F03C0,                                   # 21 ret
     ]
 
 
@@ -213,6 +227,7 @@ def build_v2(base_bytes, a, dhtb30, opts=None, log=print):
                              % (name, a[name], 4 * len(words), end))
 
     struct.pack_into('<B', d, a['FLAG'], 1)
+    struct.pack_into('<B', d, a['SLOCK'], 0)
     for name, words in blocks:
         for i, w in enumerate(words):
             struct.pack_into('<I', d, a[name] + 4 * i, w)

@@ -120,7 +120,7 @@ stay in sync (must print `I18N CHECK PASSED`).
 | ai3 two-step | unlocked + dunoguang + clean | inject only -> uboot `21d7b220…` (byte-identical to the hand-made 3-in-1) |
 | idempotent | m9u product | all kept, 0 bytes changed, md5 unchanged |
 | dw99 | YC unlock + YC banner | lock kept, banner modified -> replaced, inject -> `60b245aa…` |
-| vp19 (2026-10-23) | factory spl/uboot/trustos | full run -> uboot `182568bf…` (unlock + banners + usblog + screenlog + earlylcd + nopusboff, kick path untouched) |
+| vp19 (2026-10-23) | factory spl/uboot/trustos | full run -> uboot `29d23165…` (unlock + banners + usblog + screenlog + earlylcd + nopusboff, kick path untouched) |
 
 `python3 tests/run_cases.py` re-runs the matrix (byte-exact where known).
 

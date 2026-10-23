@@ -1124,14 +1124,15 @@ var UP = (typeof module !== 'undefined' && module.exports)
        ? module.exports : (root.UP84 = root.UP84 || {});
 var rd32 = UP.rd32, wr32 = UP.wr32, hexOff = UP.hexOff, md5 = UP.md5, u32 = UP.u32;
 var b_ = UP.b_, bl_ = UP.bl_, adrp = UP.adrp, addImm = UP.addImm;
-var ldrWImm = UP.ldrWImm, ldrbImm = UP.ldrbImm, cbzW = UP.cbzW;
+var ldrWImm = UP.ldrWImm, ldrXImm = UP.ldrXImm, ldrbImm = UP.ldrbImm,
+    cbzW = UP.cbzW, cbzX = UP.cbzX, cbnzW = UP.cbnzW, strbImm = UP.strbImm;
 var signExt = UP.signExt, branchTarget = UP.branchTarget, decPair = UP.decPair;
 var templateCandidates = UP.templateCandidates, LocateError = UP.LocateError;
 var BASE = 0x9efffe00;
 var NOP_WORD = 0xd503201f;
 var DEAD_SIZE = 0x2a4;
-var LAYOUT_V2 = [['FLAG', 0x00], ['SCREENLOG', 0x04], ['EARLYLCD', 0x34],
-                 ['HOOK', 0x70], ['PUMP', 0xa4], ['EMIT', 0xe0],
+var LAYOUT_V2 = [['FLAG', 0x00], ['SLOCK', 0x01], ['SCREENLOG', 0x04], ['EARLYLCD', 0x64],
+                 ['HOOK', 0xa0], ['PUMP', 0xd4], ['EMIT', 0x110],
                  ['DEAD_END', DEAD_SIZE]];
 
 function va(f) { return BASE + f; }
@@ -1186,6 +1187,7 @@ function locateLcd(d, log) {
   }
   if (lcdEn === null) throw new LocateError('lcd_is_enabled not found in lcd_puts');
   res.LCD_ENABLED = lcdEn;
+  res.PANEL = 0x9F1DC6B0;
   log && log('  LCD_ENABLED ' + hexOff(lcdEn));
   return res;
 }
@@ -1220,9 +1222,19 @@ function codeScreenlog(a) {
           adrp(1, V(3), a.LCD_ENABLED),
           addImm(1, 1, a.LCD_ENABLED & 0xfff),
           ldrbImm(1, 1, 0),
-          cbzW(1, 3),
-          bl_(V(7), va(a.LCD_PUTS)),
-          bl_(V(8), va(a.LCD_REFRESH)),
+          cbzW(1, 13),
+          adrp(2, V(7), a.PANEL),
+          ldrXImm(2, 2, (a.PANEL & 0xfff) >>> 3),
+          cbzX(2, 10),
+          adrp(3, V(10), va(a.SLOCK)),
+          addImm(3, 3, va(a.SLOCK) & 0xfff),
+          ldrbImm(4, 3, 0),
+          cbnzW(4, 6),
+          0xd2800024,
+          strbImm(4, 3, 0),
+          bl_(V(16), va(a.LCD_PUTS)),
+          bl_(V(17), va(a.LCD_REFRESH)),
+          strbImm(31, 3, 0),
           0xf9400be0, 0xa8c27bfd, 0xd65f03c0];
 }
 
@@ -1282,6 +1294,7 @@ function buildVp19(baseBytes, a, dhtb30, opts) {
       throw new BuildError(blocks[i][0] + ' overruns ' + hexOff(end));
   }
   d[a.FLAG] = 1;
+  d[a.SLOCK] = 0;
   for (var j = 0; j < blocks.length; j++) UP && put(d, a[blocks[j][0]], blocks[j][1]);
   wr32(d, a.PUTS, b_(va(a.PUTS), va(a.HOOK)));
   if (opts.earlylcd !== false)
@@ -1315,7 +1328,7 @@ function verifyVp19(d, a, dhtb30, opts) {
   check(rd32(d, a.FORCE_PORT) === 0x350001c0, 'kick FORCE_PORT = cbnz w0,+0x38 (factory)');
   check(rd32(d, a.TRIG) === bl_(va(a.TRIG), a.PRINTF), 'kick TRIG = bl printf (factory)');
 
-  var spec = [['SCREENLOG', 12], ['EARLYLCD', 15], ['HOOK', 13], ['PUMP', 15], ['EMIT', 39]];
+  var spec = [['SCREENLOG', 22], ['EARLYLCD', 15], ['HOOK', 13], ['PUMP', 15], ['EMIT', 39]];
   for (var i = 0; i < spec.length; i++) {
     var s = a[spec[i][0]], n = spec[i][1], bend = s + n * 4;
     var end = (i + 1 < spec.length) ? a[spec[i + 1][0]] : a.DEAD_END;
@@ -1329,7 +1342,7 @@ function verifyVp19(d, a, dhtb30, opts) {
         var pt = decPair(d, ioff, BASE);
         if (pt !== null) {
           check(pt === a.LCD_ENABLED || pt === a.PORTFLAG || pt === a.FLAG_TX ||
-                pt === va(a.FLAG),
+                pt === va(a.FLAG) || pt === a.PANEL || pt === va(a.SLOCK),
                 hexOff(va(ioff)) + ' adrp/add -> ' + hexOff(pt));
           k += 2;
           continue;
