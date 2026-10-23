@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>8541E-Uboot-Patcher</title>
+<title>SPRD-Uboot-Patcher</title>
 <style>
 :root{
   --bg:#0b0f14;
@@ -276,7 +276,7 @@ footer::before{
 <body>
 <header>
   <div class="topbar">
-    <h1>8541E-Uboot-Patcher <span>Web</span></h1>
+    <h1>SPRD-Uboot-Patcher <span>Web</span></h1>
     <select id="lang" class="lang" aria-label="Language" title="语言 / Language / Idioma">
       <option value="zh">中文</option>
       <option value="en">English</option>
@@ -301,6 +301,7 @@ footer::before{
     <h2 data-step="2" data-i18n="step2">选项</h2>
     <label class="chk"><input type="checkbox" id="o-unlock" checked> <span data-i18n="opt_unlock">去保护 — splloader secure boot / uboot lock / trustos AVB</span></label>
     <label class="chk"><input type="checkbox" id="o-usblog" checked> <span data-i18n="opt_usblog">usblog 注入 — uboot USB 实时日志</span></label>
+    <label class="chk"><input type="checkbox" id="o-gzip" checked> <span data-i18n="opt_gzip">gzip 内核解压</span></label>
     <label class="chk"><input type="checkbox" id="o-banner" checked> <span data-i18n="opt_banner">替换横幅</span></label>
     <label class="chk"><input type="checkbox" id="o-screenlog" checked> <span data-i18n="opt_screenlog">屏幕日志 - 控制台镜像到面板</span></label>
     <label class="chk"><input type="checkbox" id="o-earlylcd" checked> <span data-i18n="opt_earlylcd">提前初始化屏幕</span></label>
@@ -324,9 +325,10 @@ footer::before{
     <div id="downloads"></div>
   </section>
 </main>
-<footer data-i18n="footer">MIT © 2026 Dunoguang · 8541E-Uboot-Patcher</footer>
+<footer data-i18n="footer">MIT © 2026 Dunoguang · SPRD-Uboot-Patcher</footer>
 <script src="tpl.js"></script>
 <script src="core.js"></script>
+<script src="gzip.js"></script>
 <script src="i18n.js"></script>
 <script src="ui.js"></script>
 </body>

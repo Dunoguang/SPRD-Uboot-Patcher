@@ -1,4 +1,4 @@
-# 8541E-Uboot-Patcher
+# SPRD-Uboot-Patcher
 
 One-shot full patch for UNISOC/Spreadtrum **SL8541E**-class watches
 (same device family as the uboot-usblog / unlock-auto projects).
@@ -86,6 +86,27 @@ In --warn / --info a literal backslash-n becomes a newline; oversized
 text is rejected before anything is written.  `--verbose` turns on the
 full anchor-location / injection logs.
 
+## gzip kernel (`web/gzip.js`)
+
+Adds a boot-time gunzip stage to an uboot image.  Four anchors are
+located independently, so nothing is tied to one build:
+
+| anchor | how it is found |
+|---|---|
+| call | `bl` to the kernel read inside `_boot_load_kernel_ramdisk_image`, must sit within 0x2000 of the jump |
+| jump | the only `movz x4,#0x8008,lsl16` + `blr x4` pair |
+| gunzip | the `Error: Bad gzipped data` and `Error: gunzip out of data in header` string pair, both resolving into one function |
+| container | an unused function body after a `ret`, no external branch, smallest address |
+
+At boot the hook peeks the first bytes of the kernel segment: `1f 8b 08`
+stages the stream at `0x83800000` and inflates it to `0x80000000`; anything
+else is read straight to `0x80000000 + text_offset`, so a 4.4 kernel still
+lands at `0x80080000`.  The resolved address goes into a literal that
+`vlx_entry` loads immediately before `blr x4`.
+
+The module is state-aware: an already-patched image is recognised by the
+`ldr x4,[jv]` + `blr x4` pair and left untouched.
+
 ## Web version (`web/`)
 
 A fully client-side port of the same toolchain -- open `web/index.html`
@@ -96,7 +117,7 @@ external references; the files never leave the machine):
 - each file is analysed on the spot (lock / banner / usblog states for
   uboot, secure-boot / AVB states for the others),
 - tick the functions you want (all three are on by default) and press
-  the button,
+  the button; the optional `gzip kernel` stage can be added on top,
 - download the results; every product shows its md5 next to the button,
 - switch the whole interface between 中文 / English / Português from the
   top-right corner (the choice is remembered).
@@ -111,6 +132,13 @@ Interface strings live in `web/i18n.js` (zh / en / pt, 57 keys each);
 `node web/check_i18n.js` verifies that every key used by the HTML and
 the UI code exists in all three languages and that the dictionaries
 stay in sync (must print `I18N CHECK PASSED`).
+
+The gzip module is covered by `node web/test_gzip_node.js` (anchor location,
+build and verify on five images), `node web/test_detect.js` (clean / injected
+recognition), `node web/test_ui_flow.js` (full browser flow) and
+`node web/test_screenlog_gzip.js` (screenlog + gzip coexistence, kick bytes
+untouched).  `node tests/make_vp19_full.js <in.bin> <out.img>` runs the whole
+chain headless and writes the finished image.
 
 ## Test matrix (2026-10-02, all green)
 

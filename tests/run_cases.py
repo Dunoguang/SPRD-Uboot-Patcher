@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Four-case regression for 8541E-Uboot-Patcher (byte-exact where known)."""
+"""Four-case regression for SPRD-Uboot-Patcher (byte-exact where known)."""
 
 import hashlib
 import os

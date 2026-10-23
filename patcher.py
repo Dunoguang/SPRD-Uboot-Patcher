@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""8541E-Uboot-Patcher -- one-shot full patch for SL8541E-class watches.
+"""SPRD-Uboot-Patcher -- one-shot full patch for SL8541E-class watches.
 
 Three functions in one run:
 
@@ -63,7 +63,7 @@ def run(args):
     tr = load(args.trustos)
     fails = 0
 
-    print('8541E-Uboot-Patcher')
+    print('SPRD-Uboot-Patcher')
     print()
     print('== splloader (%d bytes)  %s ==' % (len(spl), os.path.basename(args.splloader)))
     spl_out = spl
@@ -293,7 +293,7 @@ def run(args):
 def main():
     ap = argparse.ArgumentParser(
         prog='patcher.py',
-        description='8541E-Uboot-Patcher: unlock + usblog + banner, state-aware')
+        description='SPRD-Uboot-Patcher: unlock + usblog + banner, state-aware')
     ap.add_argument('splloader')
     ap.add_argument('uboot')
     ap.add_argument('trustos')

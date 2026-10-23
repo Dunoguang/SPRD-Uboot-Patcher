@@ -1,4 +1,4 @@
-/* 8541E-Uboot-Patcher -- browser core.  Pure JS, zero external references.
+/* SPRD-Uboot-Patcher -- browser core.  Pure JS, zero external references.
  * Ports lib/{unlockauto,usblogauto,banners}.py + patcher.py.
  * Loaded by index.html as a plain script; require()d by the node tests.
  */

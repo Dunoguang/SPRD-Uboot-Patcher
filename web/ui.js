@@ -1,4 +1,4 @@
-/* 8541E-Uboot-Patcher -- browser UI.  Needs tpl.js + core.js + i18n.js loaded first. */
+/* SPRD-Uboot-Patcher -- browser UI.  Needs tpl.js + core.js + i18n.js loaded first. */
 (function () {
 'use strict';
 var C = window.UP84;
@@ -67,8 +67,12 @@ function analyze(which) {
                         det.state === 'clean' ? T('st_clean') : T('st_na'))));
       } catch (e) { out.push(chip('err', 'usblog: ' + T('st_na'))); }
       try {
-        if (C.applicableVp19(d)) out.push(chip('ok', 'panel: vp19'));
-      } catch (e) { /* not a vp19 image */ }
+        var gz = C.detectGzip(d);
+        var gzTxt = gz.state === 'injected' ? T('st_injected') :
+                    gz.state === 'clean' ? T('st_clean') : T('st_na');
+        out.push(chip(gz.state === 'injected' ? 'ok' : gz.state === 'clean' ? 'warn' : 'err',
+          'gzip: ' + gzTxt));
+      } catch (e) { out.push(chip('err', 'gzip: ' + T('st_na'))); }
       $('ub-status').innerHTML = out.join('');
       setBadge('b-ub', 'ok', d.length + ' ' + T('unit_bytes'));
     }
@@ -92,6 +96,7 @@ function processAll() {
   clearLog();
   var doUnlock = $('o-unlock').checked;
   var doUsblog = $('o-usblog').checked;
+  var doGzip = $('o-gzip').checked;
   var doBanner = $('o-banner').checked;
   var doScreenlog = $('o-screenlog').checked;
   var doEarlyLcd = $('o-earlylcd').checked;
@@ -103,7 +108,7 @@ function processAll() {
   var UB = T('unit_bytes');
 
   if (!files.ub && !files.spl && !files.tr) { log(T('need_files')); return; }
-  log('8541E-Uboot-Patcher');
+  log('SPRD-Uboot-Patcher');
   log('');
 
   if (files.spl && doUnlock) {
@@ -168,10 +173,10 @@ function processAll() {
           var a2 = C.locateVp19(files.ub);
           ubc = C.buildVp19(ubc, a2, C.rd32(ubc, 0x30),
                             { earlylcd: doEarlyLcd, nopusboff: doNoUsbOff });
-          log(T('l_vp19_inject', {
+          log(T('l_screenlog_inject', {
             puts: C.hexOff(a2.PUTS), f: C.hexOff(a2.FLAG), e: C.hexOff(a2.DEAD_END)
           }));
-          log(T('l_vp19_opts', {
+          log(T('l_panel_opts', {
             sl: 'on', el: doEarlyLcd ? 'on' : 'off', nb: doNoUsbOff ? 'on' : 'off'
           }));
           var uv2 = C.verifyVp19(ubc, a2, C.rd32(ubc, 0x30),
@@ -192,8 +197,25 @@ function processAll() {
       } else {
         log(T('l_us_na'));
       }
+      if (doGzip) {
+        try {
+          var gz = C.detectGzip(ubc);
+          if (gz.state === 'injected') {
+            log(T('l_gz_keep', { hook: C.hexOff(gz.anchors.hook), jv: C.hexOff(gz.anchors.jv) }));
+          } else if (gz.state === 'clean') {
+            var gza = gz.anchors;
+            ubc = C.buildGzip(ubc, gza);
+            log(T('l_gz_inject', { call: C.hexOff(gza.call), jmp: C.hexOff(gza.jmp),
+                                   hook: C.hexOff(gza.hook), n: gza.words }));
+            var gv = C.verifyGzip(ubc, gza);
+            log(gv.bad ? T('l_verify_fail', { note: gv.bad }) : T('l_gz_verify_ok'));
+            if (gv.bad) fails++;
+          } else log(T('l_gz_na', { why: gz.why || '' }));
+        } catch (e3) { log(T('l_gz_na', { why: e3.message || e3 })); fails++; }
+      } else log(T('l_gz_skip', { skip: T('skip_opt') }));
       log(T('l_audit', { n: C.countBytes(C.diffZones(files.ub, ubc)), unit: UB }));
-      dls.push(['uboot-unlock-bootloader-usblog.img', ubc]);
+      dls.push([doGzip ? 'uboot-unlock-bootloader-usblog-gzip.img'
+                       : 'uboot-unlock-bootloader-usblog.img', ubc]);
     } catch (e) { log(T('l_err', { msg: (e.message || e) })); fails++; }
   }
 
