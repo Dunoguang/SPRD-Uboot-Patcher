@@ -66,6 +66,9 @@ function analyze(which) {
           'usblog: ' + (det.state === 'injected' ? T('st_injected') :
                         det.state === 'clean' ? T('st_clean') : T('st_na'))));
       } catch (e) { out.push(chip('err', 'usblog: ' + T('st_na'))); }
+      try {
+        if (C.applicableVp19(d)) out.push(chip('ok', 'panel: vp19'));
+      } catch (e) { /* not a vp19 image */ }
       $('ub-status').innerHTML = out.join('');
       setBadge('b-ub', 'ok', d.length + ' ' + T('unit_bytes'));
     }
@@ -90,6 +93,9 @@ function processAll() {
   var doUnlock = $('o-unlock').checked;
   var doUsblog = $('o-usblog').checked;
   var doBanner = $('o-banner').checked;
+  var doScreenlog = $('o-screenlog').checked;
+  var doEarlyLcd = $('o-earlylcd').checked;
+  var doNoUsbOff = $('o-nopusboff').checked;
   var warnTxt = $('t-warn').value;
   var infoTxt = $('t-info').value;
   var dls = [];
@@ -158,7 +164,21 @@ function processAll() {
         log(T('l_us_keep', { off: C.hexOff(det.TRIG) }));
       } else if (det.state === 'clean') {
         if (!doUsblog) log(T('l_us_clean_skip', { skip: T('skip_opt') }));
-        else {
+        else if (C.applicableVp19(files.ub) && doScreenlog) {
+          var a2 = C.locateVp19(files.ub);
+          ubc = C.buildVp19(ubc, a2, C.rd32(ubc, 0x30),
+                            { earlylcd: doEarlyLcd, nopusboff: doNoUsbOff });
+          log(T('l_vp19_inject', {
+            puts: C.hexOff(a2.PUTS), f: C.hexOff(a2.FLAG), e: C.hexOff(a2.DEAD_END)
+          }));
+          log(T('l_vp19_opts', {
+            sl: 'on', el: doEarlyLcd ? 'on' : 'off', nb: doNoUsbOff ? 'on' : 'off'
+          }));
+          var uv2 = C.verifyVp19(ubc, a2, C.rd32(ubc, 0x30),
+                                 { earlylcd: doEarlyLcd, nopusboff: doNoUsbOff });
+          log(uv2.bad ? T('l_verify_fail', { note: uv2.bad }) : T('l_us_verify_ok'));
+          if (uv2.bad) fails++;
+        } else {
           var anchors = C.locate(files.ub);
           ubc = C.buildUsblog(ubc, anchors, C.rd32(ubc, 0x30));
           log(T('l_us_inject', {

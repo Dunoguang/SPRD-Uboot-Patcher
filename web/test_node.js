@@ -2,6 +2,7 @@
 /* Node regression for the web core -- mirrors ../tests/run_cases.py. */
 'use strict';
 globalThis.TEMPLATES_DW99 = require('./tpl.js').TEMPLATES_DW99;
+globalThis.TEMPLATES_VP19_LCD = require('./tpl.js').TEMPLATES_VP19_LCD;
 const C = require('./core.js');
 const fs = require('fs');
 const os = require('os');
@@ -56,19 +57,41 @@ function runSet(name, splPath, ubPath, trPath, ubExpect) {
   return r;
 }
 
+function have(list) {
+  for (const f of list) if (!fs.existsSync(f)) return false;
+  return true;
+}
+function maybe(name, paths, fn) {
+  if (have(paths)) { fn(); return true; }
+  console.log('skip  ' + name + ' (input missing)');
+  return false;
+}
+
 console.log('== case 1: m9u original ==');
-const r1 = runSet('m9u    ', U + '/m9u/splloader.img', U + '/m9u/uboot.img',
+let r1 = null;
+if (have([U + '/m9u/splloader.img', U + '/m9u/uboot.img', U + '/m9u/trustos.img'])) {
+r1 = runSet('m9u    ', U + '/m9u/splloader.img', U + '/m9u/uboot.img',
                   U + '/m9u/trustos.img', '1380040a3aa38e4c844cde0a4b09f55a');
+}
 console.log('== case 2: ai3 two-step (unlocked + dunoguang banner) ==');
-runSet('ai3    ', U + '/ai3-watch/splloader_has_secure_boot.bin',
-       U + '/ai3-watch/patched/uboot-unlock-bootloader.img',
-       U + '/ai3-watch/trustos_has_avb.bin', '21d7b220a891695647005fd73a161e28');
+if (have([U + '/ai3-watch/splloader_has_secure_boot.bin',
+          U + '/ai3-watch/patched/uboot-unlock-bootloader.img',
+          U + '/ai3-watch/trustos_has_avb.bin']))
+  runSet('ai3    ', U + '/ai3-watch/splloader_has_secure_boot.bin',
+         U + '/ai3-watch/patched/uboot-unlock-bootloader.img',
+         U + '/ai3-watch/trustos_has_avb.bin', '21d7b220a891695647005fd73a161e28');
+else console.log('skip  ai3 (input missing)');
 console.log('== case 3: dw99 (YC unlock + YC banner) ==');
-runSet('dw99   ', U + '/m9u/splloader.img',
-       '/root/usblog-patch-transplant-dw99/uboot-unlock-bootloader.img',
-       U + '/m9u/trustos.img', '60b245aa1686310290dc95db61353237');
+if (have([U + '/m9u/splloader.img',
+          '/root/usblog-patch-transplant-dw99/uboot-unlock-bootloader.img',
+          U + '/m9u/trustos.img']))
+  runSet('dw99   ', U + '/m9u/splloader.img',
+         '/root/usblog-patch-transplant-dw99/uboot-unlock-bootloader.img',
+         U + '/m9u/trustos.img', '60b245aa1686310290dc95db61353237');
+else console.log('skip  dw99 (input missing)');
 
 console.log('== case 4: idempotent re-run on the m9u products ==');
+if (r1) {
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'up84-'));
 fs.writeFileSync(path.join(dir, 'spl.img'), r1.spl);
 fs.writeFileSync(path.join(dir, 'ub.img'), r1.ub);
@@ -76,6 +99,29 @@ fs.writeFileSync(path.join(dir, 'tr.img'), r1.tr);
 const r1b = runSet('idem   ', path.join(dir, 'spl.img'), path.join(dir, 'ub.img'),
                    path.join(dir, 'tr.img'), '1380040a3aa38e4c844cde0a4b09f55a');
 check('re-detect still injected', C.detectUsblog(r1b.ub).state === 'injected');
+} else console.log('skip  idempotent (no m9u baseline)');
+
+console.log('== case 5: vp19 (screenlog + earlylcd + nopusboff) ==');
+const VP = process.env.VP19_DIR || '/root/vp19-0313';
+if (have([VP + '/splloader.bin', VP + '/uboot.bin', VP + '/trustos.bin'])) {
+  let ub = load(VP + '/uboot.bin');
+  const lk = C.findUbootLock(ub);
+  if (lk.patched === false) ub = C.patchLockOnly(ub, lk);
+  const bn = C.findBanners(ub);
+  if (!C.bytesEqual(bn.warn.text, C.DUNOGUANG_WARN))
+    ub = C.applyText(ub, bn.warn, C.textToBytes(DEF_WARN, bn.warn.slot, '--warn'), '--warn');
+  if (!C.bytesEqual(bn.info.text, C.DUNOGUANG_INFO))
+    ub = C.applyText(ub, bn.info, C.textToBytes(DEF_INFO, bn.info.slot, '--info'), '--info');
+  check('vp19 applicable', C.applicableVp19(ub) === true);
+  const a2 = C.locateVp19(ub);
+  ub = C.buildVp19(ub, a2, C.rd32(ub, 0x30), {});
+  const v2 = C.verifyVp19(ub, a2, C.rd32(ub, 0x30), {});
+  check('vp19 verify failures', v2.bad === 0, 'bad=' + v2.bad);
+  check('vp19 uboot md5', C.md5(ub) === '182568bf466ce13ff7016def7dd80178', C.md5(ub));
+  check('vp19 kick RET1', C.rd32(ub, a2.RET1) === 0x52800033);
+  check('vp19 kick FORCE_PORT', C.rd32(ub, a2.FORCE_PORT) === 0x350001c0);
+  check('vp19 kick TRIG', C.rd32(ub, a2.TRIG) === C.bl_(C.va(a2.TRIG), a2.PRINTF));
+} else console.log('skip  vp19 (input missing)');
 
 console.log('');
 console.log('regress:', fails === 0 ? 'PASS' : ('FAIL (' + fails + ')'));

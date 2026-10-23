@@ -28,7 +28,7 @@ if os.path.exists(os.path.join(VP19, 'uboot.bin')):
     CASES.append(('vp19', [os.path.join(VP19, 'splloader.bin'),
                            os.path.join(VP19, 'uboot.bin'),
                            os.path.join(VP19, 'trustos.bin')],
-                  '5431d99f6db81fad93421c284bf58728'))
+                  '182568bf466ce13ff7016def7dd80178'))
 SPL_MD5 = 'a9f360909ed33d200eff0874588a4c93'
 TR_MD5 = '4b7a605e410a4c239ae36250dcc08213'
 

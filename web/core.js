@@ -1113,5 +1113,251 @@ UP.va = va;
 UP.CHUNK = CHUNK; UP.BUDGET = BUDGET; UP.WAIT_MS = WAIT_MS;
 UP.buildUsblog = buildUsblog;
 UP.verifyUsblog = verifyUsblog;
+UP.pumpCode = pumpCode;
+UP.log2Code = log2Code;
+
+})(typeof self !== 'undefined' ? self : this);
+
+/* ===================== vp19 layout: screenlog + earlylcd + nopusboff ===================== */
+(function (root) {
+var UP = (typeof module !== 'undefined' && module.exports)
+       ? module.exports : (root.UP84 = root.UP84 || {});
+var rd32 = UP.rd32, wr32 = UP.wr32, hexOff = UP.hexOff, md5 = UP.md5, u32 = UP.u32;
+var b_ = UP.b_, bl_ = UP.bl_, adrp = UP.adrp, addImm = UP.addImm;
+var ldrWImm = UP.ldrWImm, ldrbImm = UP.ldrbImm, cbzW = UP.cbzW;
+var signExt = UP.signExt, branchTarget = UP.branchTarget, decPair = UP.decPair;
+var templateCandidates = UP.templateCandidates, LocateError = UP.LocateError;
+var BASE = 0x9efffe00;
+var NOP_WORD = 0xd503201f;
+var DEAD_SIZE = 0x2a4;
+var LAYOUT_V2 = [['FLAG', 0x00], ['SCREENLOG', 0x04], ['EARLYLCD', 0x34],
+                 ['HOOK', 0x70], ['PUMP', 0xa4], ['EMIT', 0xe0],
+                 ['DEAD_END', DEAD_SIZE]];
+
+function va(f) { return BASE + f; }
+function BuildError(msg) { this.message = msg; }
+
+function vp19Templates() {
+  var t = root.TEMPLATES_VP19_LCD ||
+          (typeof require === 'function' ? require('./tpl.js').TEMPLATES_VP19_LCD : null);
+  if (!t) throw new LocateError('vp19 templates not loaded (tpl.js)');
+  return t;
+}
+
+function pick(d, blk, fracMin) {
+  var cs = templateCandidates(d, blk, 8);
+  for (var i = 0; i < cs.length; i++)
+    if (cs[i].frac >= fracMin) return cs[i];
+  throw new LocateError('template at ' + blk.off + ' not found');
+}
+
+function locateLcd(d, log) {
+  var t = vp19Templates(), res = {};
+  var map = [['LCD_INIT', 'lcd_init'], ['LCD_PUTS', 'lcd_puts'],
+             ['LCD_REFRESH', 'lcd_refresh'], ['DO_CBOOT', 'do_cboot']];
+  for (var i = 0; i < map.length; i++) {
+    var c = pick(d, t.blocks[map[i][1]], 0.99);
+    res[map[i][0]] = c.off;
+    log && log('  ' + map[i][0] + ' file ' + hexOff(c.off) +
+               ' (frac ' + Math.round(100 * c.frac) + '%)');
+  }
+  var v = pick(d, t.blocks.vlx_entry, 0.99);
+  res.VLX_ENTRY = v.off;
+  res.USB_OFF_CALL = v.off + 4;
+  if ((rd32(d, res.USB_OFF_CALL) >>> 26) !== 0x25)
+    throw new LocateError('usb_off call at ' + hexOff(res.USB_OFF_CALL) + ' is not a bl');
+  log && log('  VLX_ENTRY file ' + hexOff(v.off) + '  usb_off call ' +
+             hexOff(res.USB_OFF_CALL) + ' -> ' + hexOff(UP.blTarget(d, res.USB_OFF_CALL, BASE)));
+
+  var off = res.LCD_PUTS, lcdEn = null;
+  for (var k = 0; k < 0x28 && lcdEn === null; k += 4) {
+    var w1 = rd32(d, off + k);
+    if (u32(w1 & 0x9f000000) !== 0x90000000) continue;
+    var rd = w1 & 0x1f;
+    for (var j = k + 4; j < Math.min(k + 0x28, 0x40); j += 4) {
+      var w2 = rd32(d, off + j);
+      if (u32(w2 & 0xffc00000) !== 0x39400000 || ((w2 >>> 5) & 0x1f) !== rd) continue;
+      var immlo = (w1 >>> 29) & 3, immhi = (w1 >>> 5) & 0x7ffff;
+      var imm = signExt(((immhi << 2) | immlo) >>> 0, 21);
+      var pc = off + k + BASE;
+      lcdEn = pc - (pc % 4096) + imm * 4096 + ((w2 >>> 10) & 0xfff);
+      break;
+    }
+  }
+  if (lcdEn === null) throw new LocateError('lcd_is_enabled not found in lcd_puts');
+  res.LCD_ENABLED = lcdEn;
+  log && log('  LCD_ENABLED ' + hexOff(lcdEn));
+  return res;
+}
+
+function locateVp19(d, log) {
+  var res = UP.locate(d, log);
+  for (var i = 0; i < LAYOUT_V2.length; i++)
+    res[LAYOUT_V2[i][0]] = res.FLAG + LAYOUT_V2[i][1];
+  res.HOOK_BL = res.HOOK + 0x0c;
+  res.PUTS_BODY = res.PUTS + 4;
+  var lcd = locateLcd(d, log);
+  for (var k in lcd) res[k] = lcd[k];
+  return res;
+}
+
+function applicableVp19(d) {
+  try {
+    var t = vp19Templates();
+    var keys = ['lcd_init', 'lcd_puts', 'lcd_refresh', 'do_cboot', 'vlx_entry'];
+    for (var i = 0; i < keys.length; i++) pick(d, t.blocks[keys[i]], 0.99);
+    var cs = templateCandidates(d, UP.getTemplates().blocks.puts, 4);
+    return !!cs.length && rd32(d, cs[0].off) === 0xa9bf7bfd;
+  } catch (e) {
+    return false;
+  }
+}
+
+function codeScreenlog(a) {
+  var S = a.SCREENLOG;
+  function V(k) { return va(S + k * 4); }
+  return [0xa9be7bfd, 0x910003fd, 0xf9000be0,
+          adrp(1, V(3), a.LCD_ENABLED),
+          addImm(1, 1, a.LCD_ENABLED & 0xfff),
+          ldrbImm(1, 1, 0),
+          cbzW(1, 3),
+          bl_(V(7), va(a.LCD_PUTS)),
+          bl_(V(8), va(a.LCD_REFRESH)),
+          0xf9400be0, 0xa8c27bfd, 0xd65f03c0];
+}
+
+function codeEarly(a, doCbootPrologue) {
+  var E = a.EARLYLCD;
+  function V(k) { return va(E + k * 4); }
+  return [0xa9bc7bfd, 0x910003fd, 0xa90107e0, 0xa9020fe2,
+          bl_(V(4), va(a.LCD_INIT)),
+          adrp(4, V(5), a.LCD_ENABLED),
+          addImm(4, 4, a.LCD_ENABLED & 0xfff),
+          ldrbImm(5, 4, 0),
+          cbzW(5, 2),
+          bl_(V(9), va(a.LCD_REFRESH)),
+          0xa9420fe2, 0xa94107e0, 0xa8c47bfd,
+          doCbootPrologue,
+          b_(V(14), va(a.DO_CBOOT) + 4)];
+}
+
+function codeHook(a) {
+  var H = a.HOOK;
+  function V(k) { return va(H + k * 4); }
+  return [0xa9bf7bfd, 0xa9be7bfd, 0xf9000be0,
+          adrp(1, V(3), a.PORTFLAG),
+          addImm(1, 1, a.PORTFLAG & 0xfff),
+          ldrWImm(2, 1, 0),
+          cbzW(2, 2),
+          bl_(V(7), va(a.EMIT)),
+          0xf9400be0,
+          bl_(V(9), va(a.SCREENLOG)),
+          0xf9400be0, 0xa8c27bfd,
+          b_(V(12), va(a.PUTS_BODY))];
+}
+
+function log2Args(a) {
+  var r = {};
+  for (var k in a) r[k] = a[k];
+  r.LOG2 = a.EMIT;
+  return r;
+}
+
+function buildVp19(baseBytes, a, dhtb30, opts) {
+  opts = opts || {};
+  var d = baseBytes.slice();
+  if (rd32(d, 0x30) !== dhtb30) throw new BuildError('[0x30] mismatch');
+  if (rd32(d, a.PUTS) !== 0xa9bf7bfd) throw new BuildError('puts prologue @' + hexOff(a.PUTS));
+  var dc = rd32(d, a.DO_CBOOT);
+  if (dc !== 0xa9b27bfd) throw new BuildError('do_cboot prologue @' + hexOff(a.DO_CBOOT));
+  if ((rd32(d, a.USB_OFF_CALL) >>> 26) !== 0x25)
+    throw new BuildError('usb_off call @' + hexOff(a.USB_OFF_CALL) + ' is not a bl');
+
+  var blocks = [['SCREENLOG', codeScreenlog(a)], ['EARLYLCD', codeEarly(a, dc)],
+                ['HOOK', codeHook(a)], ['PUMP', UP.pumpCode(a)],
+                ['EMIT', UP.log2Code(log2Args(a))]];
+  for (var i = 0; i < blocks.length; i++) {
+    var end = (i + 1 < blocks.length) ? a[blocks[i + 1][0]] : a.DEAD_END;
+    if (a[blocks[i][0]] + 4 * blocks[i][1].length > end)
+      throw new BuildError(blocks[i][0] + ' overruns ' + hexOff(end));
+  }
+  d[a.FLAG] = 1;
+  for (var j = 0; j < blocks.length; j++) UP && put(d, a[blocks[j][0]], blocks[j][1]);
+  wr32(d, a.PUTS, b_(va(a.PUTS), va(a.HOOK)));
+  if (opts.earlylcd !== false)
+    wr32(d, a.DO_CBOOT, b_(va(a.DO_CBOOT), va(a.EARLYLCD)));
+  if (opts.nopusboff !== false)
+    wr32(d, a.USB_OFF_CALL, NOP_WORD);
+  return d;
+}
+
+function put(d, off, words) {
+  for (var i = 0; i < words.length; i++) wr32(d, off + i * 4, words[i]);
+}
+
+function verifyVp19(d, a, dhtb30, opts) {
+  opts = opts || {};
+  var bad = 0, lines = [];
+  function check(ok, msg) {
+    lines.push((ok ? 'ok   ' : 'FAIL ') + msg);
+    if (!ok) bad += 1;
+  }
+  var hash = md5(d);
+  lines.push(d.length + ' bytes   md5 ' + hash);
+  check(rd32(d, 0x30) === dhtb30, '[0x30] == ' + hexOff(dhtb30));
+  check(rd32(d, a.PUTS) === b_(va(a.PUTS), va(a.HOOK)), 'puts entry -> hook');
+  check(d[a.FLAG] === 1, 'gate byte is 1');
+  if (opts.earlylcd !== false)
+    check(rd32(d, a.DO_CBOOT) === b_(va(a.DO_CBOOT), va(a.EARLYLCD)), 'do_cboot -> earlylcd');
+  if (opts.nopusboff !== false)
+    check(rd32(d, a.USB_OFF_CALL) === NOP_WORD, 'usb_off call is nop');
+  check(rd32(d, a.RET1) === 0x52800033, 'kick RET1 = mov w19,#1 (factory)');
+  check(rd32(d, a.FORCE_PORT) === 0x350001c0, 'kick FORCE_PORT = cbnz w0,+0x38 (factory)');
+  check(rd32(d, a.TRIG) === bl_(va(a.TRIG), a.PRINTF), 'kick TRIG = bl printf (factory)');
+
+  var spec = [['SCREENLOG', 12], ['EARLYLCD', 15], ['HOOK', 13], ['PUMP', 15], ['EMIT', 39]];
+  for (var i = 0; i < spec.length; i++) {
+    var s = a[spec[i][0]], n = spec[i][1], bend = s + n * 4;
+    var end = (i + 1 < spec.length) ? a[spec[i + 1][0]] : a.DEAD_END;
+    check(bend <= end, spec[i][0] + ' fits (' + n + ' instrs)');
+    lines.push('  --- ' + spec[i][0] + ' @ file ' + hexOff(s) + ' ---');
+    var k = 0;
+    while (k < n) {
+      var ioff = s + k * 4;
+      var tt = branchTarget(d, ioff, BASE);
+      if (tt === null && k + 1 < n) {
+        var pt = decPair(d, ioff, BASE);
+        if (pt !== null) {
+          check(pt === a.LCD_ENABLED || pt === a.PORTFLAG || pt === a.FLAG_TX ||
+                pt === va(a.FLAG),
+                hexOff(va(ioff)) + ' adrp/add -> ' + hexOff(pt));
+          k += 2;
+          continue;
+        }
+      }
+      if (tt !== null) {
+        var inside = (va(a.FLAG) <= tt && tt < va(a.DEAD_END) + 4) ||
+                     tt === va(a.LCD_PUTS) || tt === va(a.LCD_REFRESH) ||
+                     tt === va(a.LCD_INIT) ||
+                     tt === a.IRQ || tt === va(a.PUTS_BODY) ||
+                     tt === va(a.DO_CBOOT) + 4 ||
+                     (tt - 0x9f000000 + 0x200) === a.REPLY;
+        check(inside, hexOff(va(ioff)) + ' branch -> ' + hexOff(tt));
+      }
+      k += 1;
+    }
+  }
+  lines.push(bad ? 'FAILURES: ' + bad : 'OK - vp19 image looks correct');
+  return { bad: bad, lines: lines };
+}
+
+UP.BuildErrorVp19 = BuildError;
+UP.locateVp19 = locateVp19;
+UP.locateVp19 = locateVp19;
+UP.applicableVp19 = applicableVp19;
+UP.locateLcd = locateLcd;
+UP.buildVp19 = buildVp19;
+UP.verifyVp19 = verifyVp19;
+UP.LAYOUT_V2 = LAYOUT_V2;
 
 })(typeof self !== 'undefined' ? self : this);

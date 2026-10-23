@@ -135,8 +135,8 @@ def code_screenlog(a):
         A.add_imm(1, 1, a['LCD_ENABLED'] & 0xFFF),    #  4
         A.ldrb_imm(1, 1, 0),                          #  5 ldrb w1,[x1]
         A.cbz_w(1, 3),                                #  6 cbz w1,restore
-        A.bl_(V(7), a['LCD_PUTS']),                   #  7 bl lcd_puts
-        A.bl_(V(8), a['LCD_REFRESH']),                #  8 bl lcd_refresh
+        A.bl_(V(7), va(a['LCD_PUTS'])),                   #  7 bl lcd_puts
+        A.bl_(V(8), va(a['LCD_REFRESH'])),                #  8 bl lcd_refresh
         0xF9400BE0,                                   #  9 ldr x0,[sp,#0x10]
         0xA8C27BFD,                                   # 10 ldp x29,x30,[sp],#0x20
         0xD65F03C0,                                   # 11 ret
@@ -152,17 +152,17 @@ def code_early(a, do_cboot_prologue):
         0x910003FD,                                   #  1 mov x29,sp
         0xA90107E0,                                   #  2 stp x0,x1,[sp,#0x10]
         0xA9020FE2,                                   #  3 stp x2,x3,[sp,#0x20]
-        A.bl_(V(4), a['LCD_INIT']),                   #  4 bl drv_lcd_init
+        A.bl_(V(4), va(a['LCD_INIT'])),                   #  4 bl drv_lcd_init
         A.adrp(4, V(5), a['LCD_ENABLED']),            #  5
         A.add_imm(4, 4, a['LCD_ENABLED'] & 0xFFF),    #  6
         A.ldrb_imm(5, 4, 0),                          #  7
         A.cbz_w(5, 2),                                #  8 cbz w5,restore
-        A.bl_(V(9), a['LCD_REFRESH']),                #  9 bl lcd_refresh
+        A.bl_(V(9), va(a['LCD_REFRESH'])),                #  9 bl lcd_refresh
         0xA9420FE2,                                   # 10 ldp x2,x3,[sp,#0x20]
         0xA94107E0,                                   # 11 ldp x0,x1,[sp,#0x10]
         0xA8C47BFD,                                   # 12 ldp x29,x30,[sp],#0x40
         do_cboot_prologue,                            # 13 stp x29,x30,[sp,#-224]!
-        A.b_(V(14), a['DO_CBOOT'] + 4),               # 14 b do_cboot+4
+        A.b_(V(14), va(a['DO_CBOOT']) + 4),               # 14 b do_cboot+4
     ]
 
 
@@ -178,12 +178,12 @@ def code_hook(a):
         A.add_imm(1, 1, a['PORTFLAG'] & 0xFFF),       #  4
         A.ldr_w_imm(2, 1, 0),                         #  5 ldr w2,[x1]
         A.cbz_w(2, 2),                                #  6 cbz w2,no_usb
-        A.bl_(V(7), a['EMIT']),                       #  7 bl emit
+        A.bl_(V(7), va(a['EMIT'])),                       #  7 bl emit
         0xF9400BE0,                                   #  8 no_usb: ldr x0,[sp,#0x10]
-        A.bl_(V(9), a['SCREENLOG']),                  #  9 bl screenlog
+        A.bl_(V(9), va(a['SCREENLOG'])),                  #  9 bl screenlog
         0xF9400BE0,                                   # 10 ldr x0,[sp,#0x10]
         0xA8C27BFD,                                   # 11 ldp x29,x30,[sp],#0x20
-        A.b_(V(12), a['PUTS_BODY']),                  # 12 b puts+4
+        A.b_(V(12), va(a['PUTS_BODY'])),                  # 12 b puts+4
     ]
 
 
