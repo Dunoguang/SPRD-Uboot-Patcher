@@ -34,6 +34,7 @@ from lib import banners as BAN                                    # noqa: E402
 from lib.unlockauto import finder as UF, builder as UBU           # noqa: E402
 from lib.unlockauto import verify as UV, audit as UA              # noqa: E402
 from lib.usblogauto import finder as SF, builder as SB            # noqa: E402
+from lib.usblogauto import vp19 as VP                             # noqa: E402
 
 NL = chr(10)
 DEF_WARN = 'QQ:3981750101' + NL + 'Boot Format OK, Kernel Started...' + NL
@@ -164,14 +165,30 @@ def run(args):
         if args.no_usblog:
             print('   usblog      : clean (skipped; --no-usblog)')
         else:
-            try:
-                anchors = SF.locate(ub, log=log)
-            except SF.FindError as e:
-                print('   usblog      : locate failed (%s)' % e)
-                return 2
-            print('   usblog      : clean -> injected  [TRIG 0x%06x, PUTS 0x%06x, dead 0x%06x..0x%06x]'
-                  % (anchors['TRIG'], anchors['PUTS'], anchors['FLAG'], anchors['DEAD_END']))
-            ubc = bytes(SB.build(ubc, anchors, d30_of(ubc), log=log))
+            if VP.applicable(ubc) and not args.no_screenlog:
+                try:
+                    anchors = VP.locate_v2(ubc, log=log)
+                except SF.FindError as e:
+                    print('   usblog      : vp19 locate failed (%s)' % e)
+                    return 2
+                print('   usblog      : clean -> injected  [PUTS 0x%06x, dead 0x%06x..0x%06x]'
+                      % (anchors['PUTS'], anchors['FLAG'], anchors['DEAD_END']))
+                print('   screenlog   : %s   earlylcd: %s   nopusboff: %s'
+                      % ('on' if not args.no_screenlog else 'off',
+                         'on' if not args.no_earlylcd else 'off',
+                         'on' if not args.no_nopusboff else 'off'))
+                ubc = bytes(VP.build_v2(ubc, anchors, d30_of(ubc),
+                                        dict(earlylcd=not args.no_earlylcd,
+                                             nopusboff=not args.no_nopusboff), log=log))
+            else:
+                try:
+                    anchors = SF.locate(ub, log=log)
+                except SF.FindError as e:
+                    print('   usblog      : locate failed (%s)' % e)
+                    return 2
+                print('   usblog      : clean -> injected  [TRIG 0x%06x, PUTS 0x%06x, dead 0x%06x..0x%06x]'
+                      % (anchors['TRIG'], anchors['PUTS'], anchors['FLAG'], anchors['DEAD_END']))
+                ubc = bytes(SB.build(ubc, anchors, d30_of(ubc), log=log))
     elif ub_state == 'unknown':
         print('   usblog      : UNKNOWN gate state (RET1=%#x, FORCE=%#x)'
               % (det['RET1_word'], det['FORCE_word']))
@@ -253,6 +270,9 @@ def run(args):
     if anchors is not None:
         for key in ('PUTS', 'RET1', 'FORCE_PORT', 'TRIG', 'PUMP_CALL'):
             ub_zones.append([anchors[key], anchors[key] + 4])
+        if 'DO_CBOOT' in anchors:
+            ub_zones.append([anchors['DO_CBOOT'], anchors['DO_CBOOT'] + 4])
+            ub_zones.append([anchors['USB_OFF_CALL'], anchors['USB_OFF_CALL'] + 4])
         ub_zones.append([anchors['FLAG'], anchors['DEAD_END'] + 4])
     a_ok, zz, outside = UA.audit(ub, ubc, ub_zones)
     fails += 0 if a_ok else 1
@@ -284,6 +304,12 @@ def main():
     ap.add_argument('--no-unlock', action='store_true')
     ap.add_argument('--no-usblog', action='store_true')
     ap.add_argument('--no-banner', action='store_true')
+    ap.add_argument('--no-screenlog', action='store_true',
+                    help='keep the console off the panel (also disables the vp19 path)')
+    ap.add_argument('--no-earlylcd', action='store_true',
+                    help='do not bring the panel up before mode detection')
+    ap.add_argument('--no-nopusboff', action='store_true',
+                    help='power USB off before jumping to the kernel (factory behaviour)')
     args = ap.parse_args()
     return run(args)
 

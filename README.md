@@ -25,11 +25,51 @@ neighbours (`info failed!...` .. `pass_chip_uid_to_tos` for warn;
 rewrite can always be replaced, and the result can be edited again any
 number of times.
 
+## vp19 extension (2026-10-23)
+
+When the input is a vp19-class image (all five vp19 templates land and
+`puts` still carries its original prologue) the toolchain switches to a wider
+injection layout that adds three things on top of the classic usblog patch:
+
+| function | what it does | hooked at |
+|---|---|---|
+| screenlog | mirrors the console onto the panel (`lcd_puts` then `lcd_refresh`) | `puts` entry |
+| earlylcd | brings the panel up before mode detection, so the whole boot log is visible | `do_cboot` entry |
+| nopusboff | nops the `usb_phy_power_off()` call in `vlx_entry`, keeping u2s alive across the hand-off | `vlx_entry` |
+
+The code lives in the same `fb_cmd_flashing` dead zone (676 usable bytes):
+
+    +0x00 gate(4)  +0x04 screenlog(48)  +0x34 earlylcd(60)
+    +0x70 hook(52) +0xA4 pump(60)       +0xE0 emit(156)
+
+screenlog is gated on `lcd_is_enabled`, so it is silent until
+`drv_lcd_init()` has probed the panel, and `lcd_refresh()` is only issued
+after a successful probe (it prints through `printf` otherwise, which would
+recurse into the hook).
+
+### kick works again
+
+The shipped usblog patch rewrote the success path of `usb_wait_config()`:
+
+    0x1a720  350001c0 cbnz w0,+0x38   ->  1400000e b   +0x38
+    0x1a764  52800033 mov  w19,#1     ->  52800013 mov w19,#0
+
+`pctool_mode_detect()` short-circuits on `usb_wait_config() == 0`, so
+`usb_read_data()` never ran and the 10-byte u2s kick frame was never parsed:
+SPRD4 / calibration mode could not be entered from the PC tool any more.
+The vp19 path leaves those three instructions byte-identical to the factory
+(`0x1a720 / 0x1a764 / 0x1a768`), and gates the u2s mirror on the gadget's own
+port-ready flag (`0x9F1CC190`) instead of a software gate.
+
+New switches: `--no-screenlog` (also disables the vp19 path),
+`--no-earlylcd`, `--no-nopusboff`.
+
 ## Usage
 
     patcher.py <splloader> <uboot> <trustos> [--outdir DIR]
                [--warn TEXT] [--info TEXT] [--verbose]
                [--no-unlock] [--no-usblog] [--no-banner]
+               [--no-screenlog] [--no-earlylcd] [--no-nopusboff]
 
 writes (default dir = the uboot directory + `/patched/`):
 
@@ -80,6 +120,7 @@ stay in sync (must print `I18N CHECK PASSED`).
 | ai3 two-step | unlocked + dunoguang + clean | inject only -> uboot `21d7b220…` (byte-identical to the hand-made 3-in-1) |
 | idempotent | m9u product | all kept, 0 bytes changed, md5 unchanged |
 | dw99 | YC unlock + YC banner | lock kept, banner modified -> replaced, inject -> `60b245aa…` |
+| vp19 (2026-10-23) | factory spl/uboot/trustos | full run -> uboot `5431d99f…` (unlock + banners + usblog + screenlog + earlylcd + nopusboff, kick path untouched) |
 
 `python3 tests/run_cases.py` re-runs the matrix (byte-exact where known).
 
@@ -89,6 +130,7 @@ stay in sync (must print `I18N CHECK PASSED`).
     lib/banners.py          robust banner access (neighbour anchors + states)
     lib/unlockauto/         the unlock engine (splloader / uboot / trustos)
     lib/usblogauto/         the usblog injection engine (+ detect() probe)
+    lib/usblogauto/vp19.py  the vp19 layout: screenlog + earlylcd + nopusboff
     lib/profiles/           masked word templates used by the usblog finder
 
 The two engines are drop-in copies of the standalone projects; the only

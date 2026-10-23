@@ -278,6 +278,9 @@ def detect(d):
         raise FindError('TRIG probe not unique (%d of %d candidates)'
                         % (len(good), len(cands)))
     c, w1, w2 = good[0]
+    cs = template_candidates(d, t['blocks']['puts'])
+    if cs and (A.w(d, cs[0]['off']) & 0xFC000000) == 0x14000000:
+        return {'state': 'injected', 'TRIG': c, 'RET1_word': w1, 'FORCE_word': w2}
     if w1 == 0x52800033 and w2 == 0x350001C0:
         state = 'clean'
     elif w1 == 0x52800013 and w2 == 0x1400000E:
